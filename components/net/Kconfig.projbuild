@@ -1,0 +1,49 @@
+menu "hub-dot WiFi"
+
+    config HUBDOT_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            Network name. Leave it empty to keep WiFi off (the sensor still works).
+            The ESP32-C3 only supports 2.4 GHz networks.
+
+    config HUBDOT_WIFI_ENTERPRISE
+        bool "WPA2-Enterprise (username + password, e.g. eduroam)"
+        default n
+        help
+            Off: WPA2-Personal, one shared password.
+            On: WPA2-Enterprise PEAP/MSCHAPv2 with your own username and password.
+
+    config HUBDOT_WIFI_PASSWORD
+        string "WiFi password"
+        depends on !HUBDOT_WIFI_ENTERPRISE
+        default ""
+        help
+            Leave empty for an open network.
+
+    config HUBDOT_WIFI_EAP_USERNAME
+        string "Enterprise username"
+        depends on HUBDOT_WIFI_ENTERPRISE
+        default ""
+
+    config HUBDOT_WIFI_EAP_PASSWORD
+        string "Enterprise password"
+        depends on HUBDOT_WIFI_ENTERPRISE
+        default ""
+
+    config HUBDOT_CONNECTIVITY_URL
+        string "URL for the HTTP connectivity test"
+        default "http://example.com/"
+        help
+            After getting an IP the board does an HTTP GET here and logs the status code (200 = OK).
+            Use plain http://, not https://.
+
+    config HUBDOT_ALERT_URL
+        string "URL for the fall alerts (dot only)"
+        default ""
+        help
+            The dot sends a POST with a JSON body here for every fall, and repeats it until the
+            server answers 2xx. Leave it empty to only log falls on the serial monitor.
+            https:// works, checked against the ESP-IDF certificate bundle.
+
+endmenu
