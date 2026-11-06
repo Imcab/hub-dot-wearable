@@ -5,12 +5,7 @@ Wearable para monitorear a adultos mayores sin que tengan que hacer nada: mide s
 | Placa | Ubicación | Sensores | Función |
 | --- | --- | --- | --- |
 | **hub** | Muñeca | MAX30102 | Frecuencia cardiaca y SpO2, salida por WiFi |
-<<<<<<< HEAD
 | **dot** | Axila | MPU6050, TMP117 | Detección de caídas y temperatura axilar |
-=======
-| **dot** | Axila | MPU6050, TMP117 | Detección de caídas y temperatura axilar  |
-
->>>>>>> 55a3e199e31f0bcffab2b6988d94a959fff6b457
 
 ## Autores
 
