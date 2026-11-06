@@ -131,7 +131,7 @@ public:
     // Returns how many were read, or -1 on error
     int readSamples(Sample *out, int maxSamples);
 
-    // Reads the die temperature in Celsius (pages 22-23). Blocks ~30 ms while it converts
+    // Reads the die temperature in Celsius (page 22). Blocks ~30 ms while it converts
     esp_err_t readTemperature(float *out_c);
  
 private:

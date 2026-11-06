@@ -78,6 +78,7 @@ private:
     i2c_master_dev_handle_t dev_ = nullptr;
 
     esp_err_t configure();
+    esp_err_t resetFifo(); // empties the FIFO and leaves it enabled
     void release();
 
     esp_err_t writeReg(uint8_t reg, uint8_t value);

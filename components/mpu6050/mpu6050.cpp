@@ -48,8 +48,7 @@ esp_err_t MPU6050::configure()
     ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_ACCEL_CONFIG, MPU6050_ACCEL_FS_16G), MPU6050_TAG, "ACCEL_CONFIG");
 
     ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_FIFO_EN, MPU6050_FIFO_EN_ACCEL), MPU6050_TAG, "FIFO_EN");
-    ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_USER_CTRL, MPU6050_USER_FIFO_RESET), MPU6050_TAG, "FIFO reset");
-    ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_USER_CTRL, MPU6050_USER_FIFO_EN), MPU6050_TAG, "USER_CTRL");
+    ESP_RETURN_ON_ERROR(resetFifo(), MPU6050_TAG, "FIFO reset");
 
     ESP_LOGI(MPU6050_TAG, "Configured: accelerometer at %d Hz, +-16 g", (int)SAMPLE_RATE_HZ);
     return ESP_OK;
@@ -86,7 +85,7 @@ int MPU6050::readSamples(Sample *out, int maxSamples)
 
     if (bytes >= MPU6050_FIFO_FULL_BYTES) {
         ESP_LOGW(MPU6050_TAG, "FIFO full, samples were lost");
-        if (writeReg(MPU6050_REG_USER_CTRL, MPU6050_USER_FIFO_EN | MPU6050_USER_FIFO_RESET) != ESP_OK) return -1;
+        if (resetFifo() != ESP_OK) return -1;
         return 0;
     }
 
@@ -105,6 +104,13 @@ int MPU6050::readSamples(Sample *out, int maxSamples)
         out[i].z = (int16_t)((s[4] << 8) | s[5]);
     }
     return available;
+}
+
+esp_err_t MPU6050::resetFifo()
+{
+    // FIFO_RESET only works while FIFO_EN is 0 (register map, register 106)
+    ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_USER_CTRL, MPU6050_USER_FIFO_RESET), MPU6050_TAG, "FIFO_RESET");
+    return writeReg(MPU6050_REG_USER_CTRL, MPU6050_USER_FIFO_EN);
 }
 
 esp_err_t MPU6050::writeReg(uint8_t reg, uint8_t value)

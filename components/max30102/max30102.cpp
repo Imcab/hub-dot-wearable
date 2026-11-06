@@ -140,7 +140,7 @@ int MAX30102::readSamples(Sample *out, int maxSamples){
 esp_err_t MAX30102::readTemperature(float *out_c){
     ESP_RETURN_ON_FALSE(dev_ != nullptr && out_c != nullptr, ESP_ERR_INVALID_STATE, MAX30102_TAG, "not started");
 
-    // Start one conversion. It takes ~29 ms (page 22), so wait that long before the first check:
+    // Start one conversion. It takes ~29 ms (page 4), so wait that long before the first check:
     // polling earlier can see TEMP_EN still at 0 and read an old (or empty) result
     ESP_RETURN_ON_ERROR(writeReg(MAX30102_REG_DIE_TEMP_CONFIG, MAX30102_TEMP_EN), MAX30102_TAG, "TEMP_EN");
     vTaskDelay(pdMS_TO_TICKS(30));
