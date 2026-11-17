@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include "db_upload.hpp"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
@@ -26,6 +27,11 @@ static constexpr int RETRY_DELAY_MS = 1000; // wait between attempts if begin() 
 static constexpr float EFFECTIVE_SPS = 100.0f / 4.0f;
 static constexpr int REPORT_EVERY_SAMPLES = 25; // print the result once per second
 static constexpr bool PRINT_RAW = false; // true = print "red,ir" CSV (for the serial plotter) instead of the result
+
+// Sensor.numSensor of this device in the database (the device itself is found by its MAC)
+static constexpr int NUM_SENSOR_OXI = 1; // MAX30102
+// SpO2 is computed every second; one row every 15 s is plenty for the database
+static constexpr int64_t UPLOAD_PERIOD_US = 15LL * 1000 * 1000;
 
 static SemaphoreHandle_t s_readings_mutex = nullptr;
 static Readings s_readings = {};
@@ -67,6 +73,7 @@ extern "C" void app_main(void)
     // WiFi first: it does not block, and with no SSID configured it only prints the MAC
     s_readings_mutex = xSemaphoreCreateMutex();
     wifi_start("hub-dot-hub", readings_json);
+    db_upload_start();
 
     // A. Create the I2C bus
     i2c_master_bus_config_t bus_cfg{};
@@ -104,6 +111,7 @@ extern "C" void app_main(void)
     int consecutive_errors = 0;
     int samples_since_report = 0;
     uint64_t ir_sum = 0, red_sum = 0; // for the mean IR/RED of each second
+    int64_t last_upload_us = -UPLOAD_PERIOD_US; // so the first valid result is sent right away
     while (true) {
         int n = sensor.readSamples(samples, MAX30102_FIFO_DEPTH);
         if (n < 0) {
@@ -149,6 +157,16 @@ extern "C" void app_main(void)
             samples_since_report = 0;
             ir_sum = red_sum = 0;
             publish(rd);
+
+            // Only a valid SpO2 with the finger on. LecturaOxi has no column for the heart rate,
+            // and rd.temp_c is the MAX30102 die temperature, not the patient's
+            const int64_t now_us = esp_timer_get_time();
+            if (r.finger && r.spo2_valid && now_us - last_upload_us >= UPLOAD_PERIOD_US) {
+                if (db_upload_send("insertarOximetria.php", false, "spo2=%d&numSensor=%d",
+                                   (int)(r.spo2 + 0.5f), NUM_SENSOR_OXI)) {
+                    last_upload_us = now_us;
+                }
+            }
 
             if (!PRINT_RAW) {
                 char temp[16] = "--";
