@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "alert.hpp"
+#include "db_upload.hpp"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
@@ -27,6 +28,10 @@ static constexpr int MOTION_SILENCE_MS = 1000;   // no samples for this long -> 
 static constexpr int TEMP_PERIOD_MS = 30000;
 static constexpr int READ_CHUNK = 32;
 static constexpr bool PRINT_RAW = false; // true = print "ms,x,y,z" CSV to record movements, 2048 counts per g
+
+// Sensor.numSensor of this device in the database (the device itself is found by its MAC)
+static constexpr int NUM_SENSOR_TEMP = 1;   // TMP117
+static constexpr int NUM_SENSOR_MOTION = 2; // MPU6050
 
 static SemaphoreHandle_t s_mutex = nullptr;
 static DotReadings s_readings = {};
@@ -85,6 +90,16 @@ static void on_samples(const MPU6050::Sample *samples, int n)
         } else if (ev == FallDetector::Event::Fall) {
             const FallDetector::Report rep = s_detector.report();
             alert_fall(rep.peak_g, rep.angle_deg);
+
+            // One request saves the Alerta (peak g) and the LecturaMov with this sample, the posture
+            // after the fall. Axes in mg so negatives need no float formatting. Only queues it,
+            // the HTTP request happens in the db_upload task
+            char peak[16];
+            fmt_centi(peak, sizeof(peak), rep.peak_g);
+            db_upload_send("registrarCaida.php", true, "pico=%s&ax=%d&ay=%d&az=%d&numSensor=%d", peak,
+                           (int)(s.x * 1000 / MPU6050::LSB_PER_G), (int)(s.y * 1000 / MPU6050::LSB_PER_G),
+                           (int)(s.z * 1000 / MPU6050::LSB_PER_G), NUM_SENSOR_MOTION);
+
             xSemaphoreTake(s_mutex, portMAX_DELAY);
             s_readings.falls++;
             xSemaphoreGive(s_mutex);
@@ -172,10 +187,15 @@ static void service_temp(i2c_master_bus_handle_t bus, int64_t now_ms)
     s_temp_us = esp_timer_get_time();
     xSemaphoreGive(s_mutex);
 
+    char temp[16];
+    fmt_centi(temp, sizeof(temp), c);
     if (!PRINT_RAW) {
-        char temp[16];
-        fmt_centi(temp, sizeof(temp), c);
         printf("Temp: %s C%s\n", temp, stable ? "" : "  (not stable yet)");
+    }
+
+    // Until the axillary reading settles it is the skin warming up, not the body temperature
+    if (stable) {
+        db_upload_send("insertarTemperatura.php", false, "tempC=%s&numSensor=%d", temp, NUM_SENSOR_TEMP);
     }
 }
 
@@ -185,6 +205,7 @@ extern "C" void app_main(void)
 
     // WiFi first: it does not block, and with no SSID configured it only prints the MAC
     wifi_start("hub-dot-dot", readings_json);
+    db_upload_start();
     alert_start();
 
     i2c_master_bus_config_t bus_cfg{};
