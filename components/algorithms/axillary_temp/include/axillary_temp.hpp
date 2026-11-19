@@ -10,10 +10,11 @@
 // cuenta despues de una meseta a temperatura corporal
 class AxillaryTemp {
 public:
-    static constexpr int WINDOW = 10;                // lecturas, 5 minutos a una cada 30 s
-    static constexpr float MAX_SPREAD_C = 0.2f;      // variacion maxima dentro de la ventana
-    static constexpr float MIN_BODY_C = 34.0f;
-    static constexpr float MAX_BODY_C = 42.0f;
+    // PRUEBA TEMPORAL para confirmar la subida al aire. Valores reales: 10, 0.2f, 34.0f, 42.0f
+    static constexpr int WINDOW = 2;                 // lecturas, 5 minutos a una cada 30 s
+    static constexpr float MAX_SPREAD_C = 1.0f;      // variacion maxima dentro de la ventana
+    static constexpr float MIN_BODY_C = 0.0f;
+    static constexpr float MAX_BODY_C = 60.0f;
 
     void add(float c)
     {
