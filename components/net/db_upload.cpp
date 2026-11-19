@@ -1,3 +1,7 @@
+// Hub and dot 2026
+// Imad Jared Cabrera Trejo
+// Melissa Moreno Franca
+
 #include "db_upload.hpp"
 
 #include <stdarg.h>
@@ -7,28 +11,25 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_netif.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+#include "wifi.hpp"
 
 static const char *TAG = "db_upload";
-
-// Folder of the PHP scripts, no trailing slash. Change the IP to your laptop's
-// (ipconfig on Windows). The ESP32 and the laptop must be on the same network
-static constexpr const char *SERVER_URL = "http://10.48.69.181/proyecto";
 
 static constexpr int QUEUE_LEN = 16;
 static constexpr int PATH_LEN = 160;  // "script.php?query"
 static constexpr int URL_LEN = 256;
-static constexpr int BODY_LEN = 128;  // part of the answer kept to print PHP errors
+static constexpr int BODY_LEN = 128;  // parte de la respuesta que se guarda para imprimir errores de PHP
 static constexpr int HTTP_TIMEOUT_MS = 5000;
 static constexpr int NO_IP_WAIT_MS = 1000;
 static constexpr int RETRY_DELAY_MS = 5000;
-static constexpr int64_t IMPORTANT_MAX_AGE_US = 10LL * 60 * 1000 * 1000; // give up on a fall after 10 min
+static constexpr int64_t IMPORTANT_MAX_AGE_US = 10LL * 60 * 1000 * 1000; // una caida se abandona despues de 10 min
 static constexpr uint32_t TASK_STACK = 6144;
-static constexpr UBaseType_t TASK_PRIORITY = 1; // same as app_main: it shares the CPU, never takes it
+static constexpr UBaseType_t TASK_PRIORITY = 1; // igual que app_main: comparte el CPU, nunca se lo quita
 
 struct Item {
     int64_t queued_us;
@@ -40,18 +41,9 @@ enum class Result { Saved, Retry, Drop };
 
 static QueueHandle_t s_queue = nullptr;
 
-// The WiFi MAC is this board's Dispositivo.numSerie: the same firmware works on every
-// board, and the server finds idDispositivo (and the AdultoMayor wearing it) from it
+// La MAC del WiFi es el Dispositivo.numSerie de la placa: el mismo firmware sirve en todas,
+// y con ella el servidor encuentra el idDispositivo (y el AdultoMayor que lo usa)
 static char s_serial[13] = "000000000000";
-
-// Without an IP every request fails, so there is no point trying
-static bool has_ip()
-{
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (netif == nullptr) return true; // the WiFi does not use the default netif: just try
-    esp_netif_ip_info_t ip = {};
-    return esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0;
-}
 
 struct Body {
     char text[BODY_LEN];
@@ -77,7 +69,7 @@ static Result send_one(const Item &it)
 {
     const long delay_s = (long)((esp_timer_get_time() - it.queued_us) / 1000000);
     char url[URL_LEN];
-    const int len = snprintf(url, sizeof(url), "%s/%s&serie=%s&retraso=%ld", SERVER_URL, it.path, s_serial,
+    const int len = snprintf(url, sizeof(url), "%s/%s&serie=%s&retraso=%ld", CONFIG_HUBDOT_DB_URL, it.path, s_serial,
                              delay_s);
     if (len < 0 || len >= URL_LEN) {
         ESP_LOGE(TAG, "URL too long, dropped: %s", it.path);
@@ -102,7 +94,7 @@ static Result send_one(const Item &it)
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK) {
-        // Server off, wrong IP or a firewall: may work later
+        // Servidor apagado, IP equivocada o un firewall: puede funcionar despues
         ESP_LOGW(TAG, "%s: %s", url, esp_err_to_name(err));
         return Result::Retry;
     }
@@ -111,7 +103,7 @@ static Result send_one(const Item &it)
         return Result::Saved;
     }
     ESP_LOGW(TAG, "%s: HTTP %d %s", url, status, body.text);
-    // 4xx = the request itself is wrong (missing parameter, script not found): repeating it will not help
+    // 4xx = la peticion esta mal (falta un parametro, no existe el script): repetirla no sirve
     return (status >= 400 && status < 500) ? Result::Drop : Result::Retry;
 }
 
@@ -121,7 +113,7 @@ static void upload_task(void *)
     while (true) {
         xQueueReceive(s_queue, &it, portMAX_DELAY);
         while (true) {
-            const bool ip = has_ip();
+            const bool ip = wifi_wait_connected(0); // sin IP todas las peticiones fallan
             const Result res = ip ? send_one(it) : Result::Retry;
             if (res != Result::Retry) break;
             if (!it.important) {
@@ -148,7 +140,12 @@ void db_upload_start()
     }
     ESP_LOGI(TAG, "Register this board in Dispositivo with numSerie = %s", s_serial);
 
-    s_queue =xQueueCreate(QUEUE_LEN, sizeof(Item));
+    if (!wifi_configured() || strlen(CONFIG_HUBDOT_DB_URL) == 0) {
+        ESP_LOGW(TAG, "Upload disabled: set the SSID and the DB URL in `idf.py menuconfig` -> hub-dot WiFi");
+        return;
+    }
+
+    s_queue = xQueueCreate(QUEUE_LEN, sizeof(Item));
     if (s_queue == nullptr) {
         ESP_LOGE(TAG, "Could not create the queue, nothing will be uploaded");
         return;
@@ -182,7 +179,7 @@ bool db_upload_send(const char *script, bool important, const char *query_fmt, .
         return false;
     }
 
-    // Never wait here: this runs in the sensor loop
+    // Nunca esperar aqui: esto corre en el loop de los sensores
     if (xQueueSend(s_queue, &it, 0) != pdTRUE) {
         ESP_LOGW(TAG, "Queue full, dropped: %s", it.path);
         return false;

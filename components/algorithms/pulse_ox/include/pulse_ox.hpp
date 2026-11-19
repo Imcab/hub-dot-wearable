@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 // Calcula frecuencia cardiaca (BPM) y oxigenacion (SpO2) a partir de las muestras
-// crudas del MAX30102 (rojo + IR). Se alimenta muestra por muestra con addSample().
+// crudas del MAX30102 (rojo + IR, placa hub). Se alimenta muestra por muestra con addSample().
 //
 // Pipeline por muestra:
 //   1. Deteccion de dedo (nivel DC del IR)

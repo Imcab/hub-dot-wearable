@@ -4,46 +4,38 @@ menu "hub-dot WiFi"
         string "WiFi SSID"
         default ""
         help
-            Network name. Leave it empty to keep WiFi off (the sensor still works).
-            The ESP32-C3 only supports 2.4 GHz networks.
+            Nombre de la red. Dejalo vacio para no usar WiFi (los sensores siguen funcionando).
+            El ESP32-C3 solo soporta redes de 2.4 GHz.
 
     config HUBDOT_WIFI_ENTERPRISE
-        bool "WPA2-Enterprise (username + password, e.g. eduroam)"
+        bool "WPA2-Enterprise (usuario + contraseña, por ejemplo eduroam)"
         default n
         help
-            Off: WPA2-Personal, one shared password.
-            On: WPA2-Enterprise PEAP/MSCHAPv2 with your own username and password.
+            Apagado: WPA2-Personal, una contraseña compartida.
+            Encendido: WPA2-Enterprise PEAP/MSCHAPv2 con tu propio usuario y contraseña.
 
     config HUBDOT_WIFI_PASSWORD
-        string "WiFi password"
+        string "Contraseña del WiFi"
         depends on !HUBDOT_WIFI_ENTERPRISE
         default ""
         help
-            Leave empty for an open network.
+            Dejalo vacio para una red abierta.
 
     config HUBDOT_WIFI_EAP_USERNAME
-        string "Enterprise username"
+        string "Usuario Enterprise"
         depends on HUBDOT_WIFI_ENTERPRISE
         default ""
 
     config HUBDOT_WIFI_EAP_PASSWORD
-        string "Enterprise password"
+        string "Contraseña Enterprise"
         depends on HUBDOT_WIFI_ENTERPRISE
         default ""
 
-    config HUBDOT_CONNECTIVITY_URL
-        string "URL for the HTTP connectivity test"
-        default "http://example.com/"
+    config HUBDOT_DB_URL
+        string "URL de la carpeta con los scripts PHP"
+        default "http://10.48.69.181/proyecto"
         help
-            After getting an IP the board does an HTTP GET here and logs the status code (200 = OK).
-            Use plain http://, not https://.
-
-    config HUBDOT_ALERT_URL
-        string "URL for the fall alerts (dot only)"
-        default ""
-        help
-            The dot sends a POST with a JSON body here for every fall, and repeats it until the
-            server answers 2xx. Leave it empty to only log falls on the serial monitor.
-            https:// works, checked against the ESP-IDF certificate bundle.
+            Sin diagonal al final. Usa la IP de tu laptop (ipconfig en Windows); la placa y la
+            laptop deben estar en la misma red. Dejalo vacio para no subir nada.
 
 endmenu

@@ -1,6 +1,15 @@
+// Hub and dot 2026
+// Imad Jared Cabrera Trejo
+// Melissa Moreno Franca
+//
+// DOT: placa de la axila. Cada 100 ms:
+//   MPU6050 (acelerometro) -> FallDetector -> si hay caida: registrarCaida.php
+//   TMP117 (cada 30 s)     -> AxillaryTemp -> si ya es estable: insertarTemperatura.php
+// Las caidas van primero: nada de lo demas (temperatura, red) puede detener su lectura.
+
 #include <stdio.h>
 
-#include "alert.hpp"
+#include "axillary_temp.hpp"
 #include "db_upload.hpp"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -8,53 +17,30 @@
 #include "esp_timer.h"
 #include "fall_detect.hpp"
 #include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mpu6050.hpp"
 #include "tmp117.hpp"
-#include "vitals.hpp"
 #include "wifi.hpp"
 
 static const char *TAG = "main";
 
 static constexpr gpio_num_t I2C_SDA_PIN = GPIO_NUM_6; // D4
 static constexpr gpio_num_t I2C_SCL_PIN = GPIO_NUM_7; // D5
-static constexpr i2c_port_num_t I2C_PORT = I2C_NUM_0; // the C3 only has one I2C controller
+static constexpr i2c_port_num_t I2C_PORT = I2C_NUM_0; // el C3 solo tiene un controlador I2C
 
-static constexpr int LOOP_PERIOD_MS = 100;       // the MPU FIFO holds 1.7 s, the longest stop here is a TMP117 reading
-static constexpr int SENSOR_RETRY_MS = 1000;     // wait between attempts to start a missing sensor
+static constexpr int LOOP_PERIOD_MS = 100;       // el FIFO del MPU aguanta 1.7 s, lo que mas tarda aqui es leer el TMP117
+static constexpr int SENSOR_RETRY_MS = 1000;     // espera entre intentos de arrancar un sensor que no responde
 static constexpr int MAX_CONSECUTIVE_ERRORS = 10;
-static constexpr int MOTION_SILENCE_MS = 1000;   // no samples for this long -> restart the MPU6050
+static constexpr int MOTION_SILENCE_MS = 1000;   // sin muestras por este tiempo -> reiniciar el MPU6050
 static constexpr int TEMP_PERIOD_MS = 30000;
 static constexpr int READ_CHUNK = 32;
-static constexpr bool PRINT_RAW = false; // true = print "ms,x,y,z" CSV to record movements, 2048 counts per g
+static constexpr bool PRINT_RAW = false; // true = imprime CSV "ms,x,y,z" para grabar movimientos, 2048 cuentas por g
 
-// Sensor.numSensor of this device in the database (the device itself is found by its MAC)
+// Sensor.numSensor de esta placa en la base de datos (la placa se identifica por su MAC)
 static constexpr int NUM_SENSOR_TEMP = 1;   // TMP117
 static constexpr int NUM_SENSOR_MOTION = 2; // MPU6050
 
-static SemaphoreHandle_t s_mutex = nullptr;
-static DotReadings s_readings = {};
-static int64_t s_motion_us = -1; // last sample from the accelerometer, negative = never
-static int64_t s_temp_us = -1;   // last good temperature, negative = never
-
-static long age_ms(int64_t since_us)
-{
-    return (since_us < 0) ? -1 : (long)((esp_timer_get_time() - since_us) / 1000);
-}
-
-static void readings_json(char *buf, size_t len)
-{
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    const DotReadings r = s_readings;
-    const int64_t motion_us = s_motion_us;
-    const int64_t temp_us = s_temp_us;
-    xSemaphoreGive(s_mutex);
-
-    dot_readings_to_json(buf, len, r, age_ms(motion_us), age_ms(temp_us));
-}
-
-// ---------- Falls: this comes first, nothing else may stop it ----------
+// ---------- Caidas: van primero, nada mas puede detenerlas ----------
 
 static MPU6050 s_mpu;
 static FallDetector s_detector(MPU6050::SAMPLE_RATE_HZ);
@@ -89,20 +75,16 @@ static void on_samples(const MPU6050::Sample *samples, int n)
             ESP_LOGI(TAG, "Not a fall: posture changed %d degrees", (int)s_detector.report().angle_deg);
         } else if (ev == FallDetector::Event::Fall) {
             const FallDetector::Report rep = s_detector.report();
-            alert_fall(rep.peak_g, rep.angle_deg);
-
-            // One request saves the Alerta (peak g) and the LecturaMov with this sample, the posture
-            // after the fall. Axes in mg so negatives need no float formatting. Only queues it,
-            // the HTTP request happens in the db_upload task
             char peak[16];
             fmt_centi(peak, sizeof(peak), rep.peak_g);
+            ESP_LOGW(TAG, "FALL: peak %s g, posture changed %d degrees", peak, (int)lroundf(rep.angle_deg));
+
+            // Una sola peticion guarda la Alerta (pico en g) y la LecturaMov con esta muestra, la
+            // postura despues de la caida. Ejes en mg para no formatear floats negativos. Solo la
+            // encola, la peticion HTTP la hace la tarea de db_upload
             db_upload_send("registrarCaida.php", true, "pico=%s&ax=%d&ay=%d&az=%d&numSensor=%d", peak,
                            (int)(s.x * 1000 / MPU6050::LSB_PER_G), (int)(s.y * 1000 / MPU6050::LSB_PER_G),
                            (int)(s.z * 1000 / MPU6050::LSB_PER_G), NUM_SENSOR_MOTION);
-
-            xSemaphoreTake(s_mutex, portMAX_DELAY);
-            s_readings.falls++;
-            xSemaphoreGive(s_mutex);
         }
     }
 }
@@ -136,20 +118,17 @@ static void service_motion(i2c_master_bus_handle_t bus, int64_t now_ms)
         if (n > 0) {
             on_samples(samples, n);
             s_last_sample_ms = now_ms;
-            xSemaphoreTake(s_mutex, portMAX_DELAY);
-            s_motion_us = esp_timer_get_time();
-            xSemaphoreGive(s_mutex);
         }
     } while (n == READ_CHUNK);
 
-    // The bus answers but nothing arrives: a brownout leaves the sensor asleep with no error at all
+    // El bus responde pero no llega nada: una baja de voltaje deja al sensor dormido sin ningun error
     if (now_ms - s_last_sample_ms > MOTION_SILENCE_MS) {
         ESP_LOGE(TAG, "No samples for %d ms, restarting the MPU6050", MOTION_SILENCE_MS);
         restart_mpu();
     }
 }
 
-// ---------- Temperature ----------
+// ---------- Temperatura ----------
 
 static TMP117 s_tmp;
 static AxillaryTemp s_axillary;
@@ -181,11 +160,6 @@ static void service_temp(i2c_master_bus_handle_t bus, int64_t now_ms)
 
     s_axillary.add(c);
     const bool stable = s_axillary.stable();
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_readings.temp_c = c;
-    s_readings.temp_stable = stable;
-    s_temp_us = esp_timer_get_time();
-    xSemaphoreGive(s_mutex);
 
     char temp[16];
     fmt_centi(temp, sizeof(temp), c);
@@ -193,7 +167,7 @@ static void service_temp(i2c_master_bus_handle_t bus, int64_t now_ms)
         printf("Temp: %s C%s\n", temp, stable ? "" : "  (not stable yet)");
     }
 
-    // Until the axillary reading settles it is the skin warming up, not the body temperature
+    // Hasta que la lectura se estabiliza es la piel calentandose, no la temperatura corporal
     if (stable) {
         db_upload_send("insertarTemperatura.php", false, "tempC=%s&numSensor=%d", temp, NUM_SENSOR_TEMP);
     }
@@ -201,12 +175,9 @@ static void service_temp(i2c_master_bus_handle_t bus, int64_t now_ms)
 
 extern "C" void app_main(void)
 {
-    s_mutex = xSemaphoreCreateMutex();
-
-    // WiFi first: it does not block, and with no SSID configured it only prints the MAC
-    wifi_start("hub-dot-dot", readings_json);
+    // WiFi primero: no bloquea, y sin SSID configurado no hace nada
+    wifi_start("hub-dot-dot");
     db_upload_start();
-    alert_start();
 
     i2c_master_bus_config_t bus_cfg{};
     bus_cfg.i2c_port = I2C_PORT;

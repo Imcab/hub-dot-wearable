@@ -5,8 +5,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static constexpr int RESET_WAIT_MS = 10;       // the datasheet asks for 2 ms, one tick is 10 ms
-static constexpr int CONVERSION_WAIT_MS = 150; // 8 averaged conversions take about 125 ms
+static constexpr int RESET_WAIT_MS = 10;       // la hoja de datos pide 2 ms, un tick son 10 ms
+static constexpr int CONVERSION_WAIT_MS = 150; // 8 conversiones promediadas tardan unos 125 ms
 static constexpr int POLL_DELAY_MS = 10;
 static constexpr int POLL_TRIES = 10;
 
@@ -65,7 +65,7 @@ esp_err_t TMP117::readOneShot(float *out_c)
     ESP_RETURN_ON_ERROR(writeReg(TMP117_REG_CONFIG, TMP117_CFG_MOD_ONE_SHOT | TMP117_CFG_AVG_8), TMP117_TAG, "One-shot");
     vTaskDelay(pdMS_TO_TICKS(CONVERSION_WAIT_MS));
 
-    // Reading CONFIG clears Data_Ready, so stop at the first time it is set
+    // Leer CONFIG borra Data_Ready, asi que hay que parar la primera vez que aparece
     uint16_t cfg{0};
     for (int tries = 0; tries < POLL_TRIES; tries++) {
         ESP_RETURN_ON_ERROR(readReg(TMP117_REG_CONFIG, &cfg), TMP117_TAG, "Poll failed");

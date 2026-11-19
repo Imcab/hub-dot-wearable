@@ -1,3 +1,11 @@
+// Hub and dot 2026
+// Imad Jared Cabrera Trejo
+// Melissa Moreno Franca
+//
+// HUB: placa de la muñeca. Cada 100 ms:
+//   MAX30102 (LEDs rojo + IR) -> PulseOximeter -> BPM y SpO2
+// Una vez por segundo imprime el resultado, y cada 15 s sube el SpO2 valido a insertarOximetria.php.
+
 #include <stdio.h>
 
 #include "db_upload.hpp"
@@ -6,59 +14,33 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "max30102.hpp"
 #include "pulse_ox.hpp"
-#include "vitals.hpp"
 #include "wifi.hpp"
 
 static const char *TAG = "main";
 
 static constexpr gpio_num_t I2C_SDA_PIN = GPIO_NUM_6; // D4
 static constexpr gpio_num_t I2C_SCL_PIN = GPIO_NUM_7; // D5
-static constexpr i2c_port_num_t I2C_PORT = I2C_NUM_0; // the C3 only has one I2C controller
+static constexpr i2c_port_num_t I2C_PORT = I2C_NUM_0; // el C3 solo tiene un controlador I2C
 
-static constexpr int READ_PERIOD_MS = 100; // FIFO holds 32 samples, at 25 effective sps it never overflows
-static constexpr int MAX_CONSECUTIVE_ERRORS = 10; // 10 x 100 ms = 1 s failing in a row -> restart the sensor
-static constexpr int RETRY_DELAY_MS = 1000; // wait between attempts if begin() keeps failing
+static constexpr int READ_PERIOD_MS = 100; // el FIFO guarda 32 muestras, a 25 sps efectivas nunca se llena
+static constexpr int MAX_CONSECUTIVE_ERRORS = 10; // 10 x 100 ms = 1 s fallando seguido -> reiniciar el sensor
+static constexpr int RETRY_DELAY_MS = 1000; // espera entre intentos si begin() sigue fallando
 
-// Effective sample rate = SPO2_SR / SMP_AVE (100 sps / 4 = 25 sps). Keep it in sync with cfg below
+// Muestreo efectivo = SPO2_SR / SMP_AVE (100 sps / 4 = 25 sps). Debe coincidir con cfg mas abajo
 static constexpr float EFFECTIVE_SPS = 100.0f / 4.0f;
-static constexpr int REPORT_EVERY_SAMPLES = 25; // print the result once per second
-static constexpr bool PRINT_RAW = false; // true = print "red,ir" CSV (for the serial plotter) instead of the result
+static constexpr int REPORT_EVERY_SAMPLES = 25; // imprime el resultado una vez por segundo
+static constexpr bool PRINT_RAW = false; // true = imprime CSV "red,ir" (para el serial plotter) en vez del resultado
 
-// Sensor.numSensor of this device in the database (the device itself is found by its MAC)
+// Sensor.numSensor de esta placa en la base de datos (la placa se identifica por su MAC)
 static constexpr int NUM_SENSOR_OXI = 1; // MAX30102
-// SpO2 is computed every second; one row every 15 s is plenty for the database
+// El SpO2 se calcula cada segundo; una fila cada 15 s es suficiente para la base de datos
 static constexpr int64_t UPLOAD_PERIOD_US = 15LL * 1000 * 1000;
 
-static SemaphoreHandle_t s_readings_mutex = nullptr;
-static Readings s_readings = {};
-static int64_t s_readings_us = -1; // when they were published, negative = never
-
-// Stores a copy of the readings for the HTTP server, stamped with the current time
-static void publish(const Readings &r)
-{
-    xSemaphoreTake(s_readings_mutex, portMAX_DELAY);
-    s_readings = r;
-    s_readings_us = esp_timer_get_time();
-    xSemaphoreGive(s_readings_mutex);
-}
-
-static void readings_json(char *buf, size_t len)
-{
-    xSemaphoreTake(s_readings_mutex, portMAX_DELAY);
-    const Readings r = s_readings;
-    const int64_t taken_us = s_readings_us;
-    xSemaphoreGive(s_readings_mutex);
-
-    const long age_ms = (taken_us < 0) ? -1 : (long)((esp_timer_get_time() - taken_us) / 1000);
-    readings_to_json(buf, len, r, age_ms);
-}
-
-// Keeps retrying until the sensor answers (e.g. a loose wire that gets reconnected).
-// Nobody is there to reboot a device worn by a patient, so it never gives up
+// Reintenta hasta que el sensor responda (por ejemplo, un cable flojo que se vuelve a conectar).
+// Nadie va a reiniciar una placa que trae puesta un paciente, asi que nunca se rinde
 static void start_sensor(MAX30102 &sensor, i2c_master_bus_handle_t bus, const MAX30102::Config &cfg)
 {
     esp_err_t err;
@@ -70,12 +52,11 @@ static void start_sensor(MAX30102 &sensor, i2c_master_bus_handle_t bus, const MA
 
 extern "C" void app_main(void)
 {
-    // WiFi first: it does not block, and with no SSID configured it only prints the MAC
-    s_readings_mutex = xSemaphoreCreateMutex();
-    wifi_start("hub-dot-hub", readings_json);
+    // WiFi primero: no bloquea, y sin SSID configurado no hace nada
+    wifi_start("hub-dot-hub");
     db_upload_start();
 
-    // A. Create the I2C bus
+    // Bus I2C
     i2c_master_bus_config_t bus_cfg{};
     bus_cfg.i2c_port = I2C_PORT;
     bus_cfg.sda_io_num = I2C_SDA_PIN;
@@ -110,14 +91,14 @@ extern "C" void app_main(void)
     MAX30102::Sample samples[MAX30102_FIFO_DEPTH];
     int consecutive_errors = 0;
     int samples_since_report = 0;
-    uint64_t ir_sum = 0, red_sum = 0; // for the mean IR/RED of each second
-    int64_t last_upload_us = -UPLOAD_PERIOD_US; // so the first valid result is sent right away
+    uint64_t ir_sum = 0, red_sum = 0; // para el promedio IR/RED de cada segundo
+    int64_t last_upload_us = -UPLOAD_PERIOD_US; // para que el primer resultado valido se mande de inmediato
     while (true) {
         int n = sensor.readSamples(samples, MAX30102_FIFO_DEPTH);
         if (n < 0) {
             consecutive_errors++;
             if (consecutive_errors == 1) {
-                ESP_LOGW(TAG, "readSamples failed"); // only the first one, so the monitor is not flooded
+                ESP_LOGW(TAG, "readSamples failed"); // solo el primero, para no llenar el monitor
             }
             if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
                 ESP_LOGE(TAG, "%d errors in a row, restarting the sensor", consecutive_errors);
@@ -144,22 +125,14 @@ extern "C" void app_main(void)
 
         samples_since_report += (n > 0) ? n : 0;
         if (samples_since_report >= REPORT_EVERY_SAMPLES) {
-            Readings rd = {};
-            PulseOximeter::Result r = ox.result();
-            rd.finger = r.finger;
-            rd.hr_valid = r.hr_valid;
-            rd.spo2_valid = r.spo2_valid;
-            rd.bpm = r.bpm;
-            rd.spo2 = r.spo2;
-            rd.ir = (uint32_t)(ir_sum / samples_since_report);
-            rd.red = (uint32_t)(red_sum / samples_since_report);
-            rd.temp_valid = (sensor.readTemperature(&rd.temp_c) == ESP_OK);
+            const PulseOximeter::Result r = ox.result();
+            const unsigned long ir = (unsigned long)(ir_sum / samples_since_report);
+            const unsigned long red = (unsigned long)(red_sum / samples_since_report);
             samples_since_report = 0;
             ir_sum = red_sum = 0;
-            publish(rd);
 
-            // Only a valid SpO2 with the finger on. LecturaOxi has no column for the heart rate,
-            // and rd.temp_c is the MAX30102 die temperature, not the patient's
+            // Solo un SpO2 valido con el dedo puesto. LecturaOxi no tiene columna para el pulso,
+            // y la temperatura del MAX30102 es la del chip, no la del paciente
             const int64_t now_us = esp_timer_get_time();
             if (r.finger && r.spo2_valid && now_us - last_upload_us >= UPLOAD_PERIOD_US) {
                 if (db_upload_send("insertarOximetria.php", false, "spo2=%d&numSensor=%d",
@@ -172,13 +145,14 @@ extern "C" void app_main(void)
                 char temp[16] = "--";
                 char hr[16] = "--";
                 char sp[16] = "--";
-                if (rd.temp_valid) fmt_centi(temp, sizeof(temp), rd.temp_c);
+                float die_c = 0;
+                if (sensor.readTemperature(&die_c) == ESP_OK) fmt_centi(temp, sizeof(temp), die_c);
                 if (r.hr_valid) snprintf(hr, sizeof(hr), "%d", (int)(r.bpm + 0.5f));
                 if (r.spo2_valid) snprintf(sp, sizeof(sp), "%d", (int)(r.spo2 + 0.5f));
                 const char *note = !r.finger ? "  (no finger)"
                                  : (r.hr_valid && r.spo2_valid) ? "" : "  (measuring...)";
                 printf("IR: %6lu | RED: %6lu | Temp: %s C | HR: %s bpm | SpO2: %s %%%s\n",
-                       (unsigned long)rd.ir, (unsigned long)rd.red, temp, hr, sp, note);
+                       ir, red, temp, hr, sp, note);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(READ_PERIOD_MS));

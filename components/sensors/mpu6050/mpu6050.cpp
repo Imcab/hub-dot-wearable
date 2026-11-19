@@ -8,7 +8,7 @@
 static constexpr int RESET_WAIT_MS = 100;
 static constexpr int MAX_FIFO_READ_SAMPLES = 32;
 
-// Sample rate = 1 kHz / (1 + SMPLRT_DIV)
+// Frecuencia de muestreo = 1 kHz / (1 + SMPLRT_DIV)
 static constexpr uint8_t SMPLRT_DIV_100HZ = 9;
 
 MPU6050::~MPU6050()
@@ -28,7 +28,7 @@ esp_err_t MPU6050::configure()
 {
     uint8_t v{0};
     ESP_RETURN_ON_ERROR(readRegs(MPU6050_REG_WHO_AM_I, &v, 1), MPU6050_TAG, "Could not read WHO_AM_I");
-    // Many cheap modules carry a compatible clone with another ID: warn, but keep going
+    // Muchos modulos baratos traen un clon compatible con otro ID: avisa, pero sigue
     if (v != MPU6050_EXPECTED_WHO_AM_I) {
         ESP_LOGW(MPU6050_TAG, "WHO_AM_I = 0x%02X (expected 0x%02X), it may be a clone", v, MPU6050_EXPECTED_WHO_AM_I);
     } else {
@@ -40,7 +40,7 @@ esp_err_t MPU6050::configure()
     ESP_RETURN_ON_ERROR(readRegs(MPU6050_REG_PWR_MGMT_1, &v, 1), MPU6050_TAG, "Reset poll failed");
     ESP_RETURN_ON_FALSE(!(v & MPU6050_PWR1_DEVICE_RESET), ESP_ERR_TIMEOUT, MPU6050_TAG, "Reset did not finish");
 
-    // CLKSEL = 0 (internal oscillator, the gyro is off) and SLEEP = 0: it wakes up asleep after a reset
+    // CLKSEL = 0 (oscilador interno, el giroscopio esta apagado) y SLEEP = 0: despues de un reset arranca dormido
     ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_PWR_MGMT_1, MPU6050_PWR1_TEMP_DIS), MPU6050_TAG, "PWR_MGMT_1");
     ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_PWR_MGMT_2, MPU6050_PWR2_STBY_GYRO), MPU6050_TAG, "PWR_MGMT_2");
     ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_CONFIG, MPU6050_DLPF_44HZ), MPU6050_TAG, "CONFIG");
@@ -108,7 +108,7 @@ int MPU6050::readSamples(Sample *out, int maxSamples)
 
 esp_err_t MPU6050::resetFifo()
 {
-    // FIFO_RESET only works while FIFO_EN is 0 (register map, register 106)
+    // FIFO_RESET solo funciona mientras FIFO_EN es 0 (mapa de registros, registro 106)
     ESP_RETURN_ON_ERROR(writeReg(MPU6050_REG_USER_CTRL, MPU6050_USER_FIFO_RESET), MPU6050_TAG, "FIFO_RESET");
     return writeReg(MPU6050_REG_USER_CTRL, MPU6050_USER_FIFO_EN);
 }

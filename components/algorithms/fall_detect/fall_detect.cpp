@@ -90,9 +90,9 @@ FallDetector::Event FallDetector::addSample(float ax, float ay, float az)
 
     switch (state_) {
     case State::Idle:
-        // Without the full history there is no gravity from before the impact to compare with
+        // Sin el historial completo no hay gravedad de antes del golpe para comparar
         if (mag > IMPACT_G && history_count_ == HISTORY_LEN) {
-            reference_ = history_[history_idx_]; // the oldest entry
+            reference_ = history_[history_idx_]; // la entrada mas vieja
             peak_g_ = mag;
             enter(State::Settling);
             return Event::Impact;
@@ -120,8 +120,8 @@ FallDetector::Event FallDetector::addSample(float ax, float ay, float az)
             const double var = sum_mag2_ / window_n_ - m * m;
             const bool still = sqrt(var > 0 ? var : 0) < STILL_STD_G;
 
-            // Out of time counts too: someone struggling on the floor never gets still,
-            // and someone who walked away is upright again, so the angle still tells them apart
+            // Que se acabe el tiempo tambien cuenta: alguien forcejeando en el piso nunca queda quieto,
+            // y alguien que se fue caminando ya esta derecho, asi que el angulo los sigue distinguiendo
             if (still || state_n_ >= watch_samples_) return decide(mean);
             resetWindow();
         }
