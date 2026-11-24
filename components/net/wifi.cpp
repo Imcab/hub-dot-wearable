@@ -4,11 +4,13 @@
 
 #include "wifi.hpp"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_eap_client.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -62,6 +64,17 @@ static void event_handler(void *, esp_event_base_t base, int32_t id, void *data)
         ESP_LOGI(TAG, "Connected to \"%s\", IP " IPSTR "  Gateway " IPSTR, CONFIG_HUBDOT_WIFI_SSID,
                  IP2STR(&ev->ip_info.ip), IP2STR(&ev->ip_info.gw));
     }
+}
+
+const char *board_serial()
+{
+    static char serial[13] = "";
+    if (serial[0] == '\0') {
+        uint8_t mac[6] = {};
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        snprintf(serial, sizeof(serial), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    return serial;
 }
 
 bool wifi_configured()

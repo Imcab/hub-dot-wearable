@@ -16,4 +16,8 @@ bool wifi_configured();
 // Espera a que la placa tenga IP. Devuelve false si se acaba el tiempo o el WiFi esta apagado
 bool wifi_wait_connected(int timeout_ms);
 
+// MAC del WiFi en hex ("B81F3F2CA220"): es el Dispositivo.numSerie de la placa en la base de
+// datos. El mismo firmware sirve en todas las placas y cada una se identifica sola
+const char *board_serial();
+
 #endif

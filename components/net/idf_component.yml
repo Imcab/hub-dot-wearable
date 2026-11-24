@@ -1,0 +1,5 @@
+## Componentes del ESP Component Registry (idf.py los descarga solo en el primer build)
+dependencies:
+  idf: ">=6.0"
+  espressif/mqtt: "^1.1.0"          # cliente MQTT (ya no viene incluido en ESP-IDF 6)
+  bblanchon/arduinojson: "^7.4.3"   # arma el payload JSON, la misma libreria del sketch del reto

@@ -38,4 +38,24 @@ menu "hub-dot WiFi"
             Sin diagonal al final. Usa la IP de tu laptop (ipconfig en Windows); la placa y la
             laptop deben estar en la misma red. Dejalo vacio para no subir nada.
 
+    config HUBDOT_TEAM_ID
+        string "Equipo (para el tópico MQTT y el device_id)"
+        default "eq01"
+        help
+            Publica en reto2026/<equipo>/data con device_id "<equipo>-hub" o "<equipo>-dot".
+
+    config HUBDOT_MQTT_BROKER_URI
+        string "URI del broker MQTT"
+        default ""
+        help
+            Por ejemplo mqtt://192.168.1.10:1883. Dejalo vacio para no usar MQTT.
+
+    config HUBDOT_MQTT_USERNAME
+        string "Usuario del broker MQTT"
+        default ""
+
+    config HUBDOT_MQTT_PASSWORD
+        string "Contraseña del broker MQTT"
+        default ""
+
 endmenu

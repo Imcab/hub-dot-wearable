@@ -10,7 +10,6 @@
 
 #include "esp_http_client.h"
 #include "esp_log.h"
-#include "esp_mac.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -41,10 +40,6 @@ enum class Result { Saved, Retry, Drop };
 
 static QueueHandle_t s_queue = nullptr;
 
-// La MAC del WiFi es el Dispositivo.numSerie de la placa: el mismo firmware sirve en todas,
-// y con ella el servidor encuentra el idDispositivo (y el AdultoMayor que lo usa)
-static char s_serial[13] = "000000000000";
-
 struct Body {
     char text[BODY_LEN];
     int len;
@@ -69,7 +64,7 @@ static Result send_one(const Item &it)
 {
     const long delay_s = (long)((esp_timer_get_time() - it.queued_us) / 1000000);
     char url[URL_LEN];
-    const int len = snprintf(url, sizeof(url), "%s/%s&serie=%s&retraso=%ld", CONFIG_HUBDOT_DB_URL, it.path, s_serial,
+    const int len = snprintf(url, sizeof(url), "%s/%s&serie=%s&retraso=%ld", CONFIG_HUBDOT_DB_URL, it.path, board_serial(),
                              delay_s);
     if (len < 0 || len >= URL_LEN) {
         ESP_LOGE(TAG, "URL too long, dropped: %s", it.path);
@@ -133,12 +128,7 @@ void db_upload_start()
 {
     if (s_queue != nullptr) return;
 
-    uint8_t mac[6] = {};
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
-        snprintf(s_serial, sizeof(s_serial), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4],
-                 mac[5]);
-    }
-    ESP_LOGI(TAG, "Register this board in Dispositivo with numSerie = %s", s_serial);
+    ESP_LOGI(TAG, "Register this board in Dispositivo with numSerie = %s", board_serial());
 
     if (!wifi_configured() || strlen(CONFIG_HUBDOT_DB_URL) == 0) {
         ESP_LOGW(TAG, "Upload disabled: set the SSID and the DB URL in `idf.py menuconfig` -> hub-dot WiFi");

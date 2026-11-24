@@ -4,9 +4,13 @@
 //
 // HUB: placa de la muñeca. Cada 100 ms:
 //   MAX30102 (LEDs rojo + IR) -> PulseOximeter -> BPM y SpO2
-// Una vez por segundo imprime el resultado, y cada 15 s sube el SpO2 valido a insertarOximetria.php.
+// Una vez por segundo imprime el resultado. Cada 15 s sube el SpO2 valido a insertarOximetria.php,
+// y cada 5 s publica el payload JSON (spo2, hr, alarma) por MQTT en reto2026/<equipo>/data.
 
+#include <math.h>
 #include <stdio.h>
+
+#include "ArduinoJson.h"
 
 #include "db_upload.hpp"
 #include "driver/gpio.h"
@@ -16,7 +20,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "max30102.hpp"
+#include "mqtt_pub.hpp"
 #include "pulse_ox.hpp"
+#include "vital_ranges.hpp"
 #include "wifi.hpp"
 
 static const char *TAG = "main";
@@ -38,6 +44,39 @@ static constexpr bool PRINT_RAW = false; // true = imprime CSV "red,ir" (para el
 static constexpr int NUM_SENSOR_OXI = 1; // MAX30102
 // El SpO2 se calcula cada segundo; una fila cada 15 s es suficiente para la base de datos
 static constexpr int64_t UPLOAD_PERIOD_US = 15LL * 1000 * 1000;
+static constexpr int64_t PUBLISH_PERIOD_US = 5LL * 1000 * 1000; // payload MQTT "cada pocos segundos"
+static constexpr size_t PAYLOAD_LEN = 256;
+
+// Arma el payload del esquema de datos (README -> Esquema de datos). Lo que todavia no es
+// valido (sin dedo, o midiendo) va como null, no como 0: un 0 se graficaria como lectura real
+static size_t build_payload(const PulseOximeter::Result &r, char *out, size_t len)
+{
+    JsonDocument doc;
+    doc["device_id"] = mqtt_device_id();
+    doc["serie"] = board_serial();            // Dispositivo.numSerie, para guardarlo en la BD
+    doc["ts"] = mqtt_timestamp();             // Unix UTC (segundos)
+    doc["ts_sync"] = mqtt_time_synced();      // false = ts son segundos desde el arranque
+    doc["finger"] = r.finger;
+    if (r.finger && r.spo2_valid) {
+        doc["spo2"] = round(r.spo2 * 10.0) / 10.0; // %, un decimal
+    } else {
+        doc["spo2"] = nullptr;
+    }
+    if (r.finger && r.hr_valid) {
+        doc["hr"] = (int)lroundf(r.bpm);           // lpm
+    } else {
+        doc["hr"] = nullptr;
+    }
+
+    doc["alarm"] = false;
+    JsonArray reasons = doc["alarm_reasons"].to<JsonArray>();
+    if (r.finger && r.spo2_valid && r.spo2 < vital::SPO2_MIN) reasons.add("spo2_low");
+    if (r.finger && r.hr_valid && r.bpm < vital::HR_MIN) reasons.add("hr_low");
+    if (r.finger && r.hr_valid && r.bpm > vital::HR_MAX) reasons.add("hr_high");
+    doc["alarm"] = reasons.size() > 0;
+
+    return serializeJson(doc, out, len);
+}
 
 // Reintenta hasta que el sensor responda (por ejemplo, un cable flojo que se vuelve a conectar).
 // Nadie va a reiniciar una placa que trae puesta un paciente, asi que nunca se rinde
@@ -55,6 +94,7 @@ extern "C" void app_main(void)
     // WiFi primero: no bloquea, y sin SSID configurado no hace nada
     wifi_start("hub-dot-hub");
     db_upload_start();
+    mqtt_pub_start("hub");
 
     // Bus I2C
     i2c_master_bus_config_t bus_cfg{};
@@ -93,6 +133,7 @@ extern "C" void app_main(void)
     int samples_since_report = 0;
     uint64_t ir_sum = 0, red_sum = 0; // para el promedio IR/RED de cada segundo
     int64_t last_upload_us = -UPLOAD_PERIOD_US; // para que el primer resultado valido se mande de inmediato
+    int64_t last_publish_us = -PUBLISH_PERIOD_US;
     while (true) {
         int n = sensor.readSamples(samples, MAX30102_FIFO_DEPTH);
         if (n < 0) {
@@ -139,6 +180,14 @@ extern "C" void app_main(void)
                                    (int)(r.spo2 + 0.5f), NUM_SENSOR_OXI)) {
                     last_upload_us = now_us;
                 }
+            }
+
+            if (now_us - last_publish_us >= PUBLISH_PERIOD_US) {
+                last_publish_us = now_us;
+                char payload[PAYLOAD_LEN];
+                const size_t len = build_payload(r, payload, sizeof(payload));
+                if (!PRINT_RAW) printf("%s\n", payload); // evidencia del payload en el monitor serial
+                mqtt_pub_publish(payload, len);
             }
 
             if (!PRINT_RAW) {
